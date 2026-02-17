@@ -85,29 +85,43 @@ def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
     key = os.getenv("FINNHUB_API_KEY", "").strip()
     if not key:
         return None
+
+    # Map Yahoo-style symbols to Finnhub format
+    symbol_map = {
+        "BTC-USD":  "BINANCE:BTCUSDT",
+        "ETH-USD":  "BINANCE:ETHUSDT",
+        "EURUSD=X": "OANDA:EUR_USD",
+        "GBPUSD=X": "OANDA:GBP_USD",
+    }
+    fh_symbol = symbol_map.get(symbol, symbol)
+
     try:
-        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={key}"
+        # Get current quote
+        url = f"https://finnhub.io/api/v1/quote?symbol={fh_symbol}&token={key}"
         r = requests.get(url, timeout=10)
         q = r.json()
         if not q.get("c") or q["c"] == 0:
-            logger.warning("Finnhub quote empty for %s: %s", symbol, q)
+            logger.warning("Finnhub quote empty for %s: %s", fh_symbol, q)
             return None
         price = q["c"]
         prev  = q["pc"]
         high  = q["h"]
         low   = q["l"]
         open_ = q["o"]
-        # For indicators we need history — fetch daily candles
+
+        # Get daily candle history for proper RSI/EMA
         now  = int(time.time())
         back = 365 * 86400
         curl = (f"https://finnhub.io/api/v1/stock/candle"
-                f"?symbol={symbol}&resolution=D&from={now-back}&to={now}&token={key}")
+                f"?symbol={fh_symbol}&resolution=D&from={now-back}&to={now}&token={key}")
         cr = requests.get(curl, timeout=10)
         cd = cr.json()
-        if cd.get("s") == "ok" and cd.get("c"):
+        if cd.get("s") == "ok" and cd.get("c") and len(cd["c"]) > 14:
             closes = cd["c"]
         else:
-            closes = [prev, price]
+            # fallback — not enough history, RSI unreliable
+            closes = [prev] * 14 + [price]
+
         rsi   = calculate_rsi(closes)
         ema20 = calculate_ema(closes, 20)
         ema50 = calculate_ema(closes, 50)
