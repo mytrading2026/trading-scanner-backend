@@ -84,31 +84,39 @@ INTERVAL_TO_FINNHUB = {"1m":"1","5m":"5","15m":"15","30m":"30",
 def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
     key = os.getenv("FINNHUB_API_KEY", "").strip()
     if not key:
-        logger.warning("FINNHUB_API_KEY not set")
         return None
     try:
-        res  = INTERVAL_TO_FINNHUB.get(interval, "15")
-        now  = int(time.time())
-        back = 7 * 86400 if interval in ("1m","5m","15m","30m","1h","4h") else 365 * 86400
-        url  = (f"https://finnhub.io/api/v1/stock/candle"
-                f"?symbol={symbol}&resolution={res}&from={now-back}&to={now}&token={key}")
-        r    = requests.get(url, timeout=10)
-        data = r.json()
-        if data.get("s") != "ok" or not data.get("c"):
-            logger.warning("Finnhub no data for %s: %s", symbol, data.get("s"))
+        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={key}"
+        r = requests.get(url, timeout=10)
+        q = r.json()
+        if not q.get("c") or q["c"] == 0:
+            logger.warning("Finnhub quote empty for %s: %s", symbol, q)
             return None
-        closes = data["c"]
-        price  = closes[-1]
-        rsi    = calculate_rsi(closes)
-        ema20  = calculate_ema(closes, 20)
-        ema50  = calculate_ema(closes, 50)
+        price = q["c"]
+        prev  = q["pc"]
+        high  = q["h"]
+        low   = q["l"]
+        open_ = q["o"]
+        # For indicators we need history — fetch daily candles
+        now  = int(time.time())
+        back = 365 * 86400
+        curl = (f"https://finnhub.io/api/v1/stock/candle"
+                f"?symbol={symbol}&resolution=D&from={now-back}&to={now}&token={key}")
+        cr = requests.get(curl, timeout=10)
+        cd = cr.json()
+        if cd.get("s") == "ok" and cd.get("c"):
+            closes = cd["c"]
+        else:
+            closes = [prev, price]
+        rsi   = calculate_rsi(closes)
+        ema20 = calculate_ema(closes, 20)
+        ema50 = calculate_ema(closes, 50)
         return {
             "symbol": symbol, "price": round(price, 4),
-            "open":   round(data["o"][-1], 4),
-            "high":   round(data["h"][-1], 4),
-            "low":    round(data["l"][-1], 4),
-            "volume": data["v"][-1],
+            "open": round(open_, 4), "high": round(high, 4),
+            "low": round(low, 4), "volume": 0,
             "rsi": rsi, "ema20": ema20, "ema50": ema50,
+            "change_pct": round((price - prev) / prev * 100, 2) if prev else 0,
             "signal": generate_signal(price, rsi, ema20, ema50, current_strategy),
             "interval": interval, "source": "finnhub",
             "timestamp": datetime.utcnow().isoformat(),
