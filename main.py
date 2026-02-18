@@ -49,19 +49,20 @@ STRATEGIES = {
 def calculate_rsi(prices: list, period: int = 14) -> float:
     if len(prices) < period + 1:
         return 50.0
-    arr   = np.array(prices, dtype=float)
-    d     = np.diff(arr)
-    gains = np.where(d > 0, d, 0.0)
-    losses= np.where(d < 0, -d, 0.0)
-    ag    = np.mean(gains[:period])
-    al    = np.mean(losses[:period])
-    return 100.0 if al == 0 else round(100.0 - 100.0 / (1.0 + ag / al), 2)
-
-def calculate_ema(prices: list, period: int = 20) -> float:
-    if not prices:
-        return 0.0
-    s = pd.Series(prices, dtype=float)
-    return round(float(s.ewm(span=period, adjust=False).mean().iloc[-1]), 4)
+    arr    = np.array(prices[-50:], dtype=float)  # use last 50 candles max
+    d      = np.diff(arr)
+    gains  = np.where(d > 0, d, 0.0)
+    losses = np.where(d < 0, -d, 0.0)
+    # Use Wilder's smoothing instead of simple average
+    ag = np.mean(gains[:period])
+    al = np.mean(losses[:period])
+    for i in range(period, len(gains)):
+        ag = (ag * (period - 1) + gains[i]) / period
+        al = (al * (period - 1) + losses[i]) / period
+    if al == 0:
+        return 100.0 if ag > 0 else 50.0
+    rs = ag / al
+    return round(100.0 - 100.0 / (1.0 + rs), 2)
 
 def generate_signal(price, rsi, ema20, ema50, strategy="default") -> str:
     if strategy == "aggressive":
