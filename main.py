@@ -37,7 +37,7 @@ demo_account      = {
 }
 
 SCAN_SYMBOLS = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN",
-                "BTC-USD", "ETH-USD", "EURUSD=X", "GBPUSD=X"]
+                "BTC-USD", "ETH-USD", "NVDA", "META", "AMD"]
 
 STRATEGIES = {
     "default":      "RSI + EMA crossover",
@@ -87,12 +87,10 @@ def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
         return None
 
     # Map Yahoo-style symbols to Finnhub format
-    symbol_map = {
-        "BTC-USD":  "BINANCE:BTCUSDT",
-        "ETH-USD":  "BINANCE:ETHUSDT",
-        "EURUSD=X": "OANDA:EUR_USD",
-        "GBPUSD=X": "OANDA:GBP_USD",
-    }
+symbol_map = {
+    "BTC-USD": "BINANCE:BTCUSDT",
+    "ETH-USD": "BINANCE:ETHUSDT",
+}
     fh_symbol = symbol_map.get(symbol, symbol)
 
     try:
