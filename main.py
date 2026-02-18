@@ -86,7 +86,7 @@ def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
     if not key:
         return None
 
-# Map Yahoo-style symbols to Finnhub format
+    # Map Yahoo-style symbols to Finnhub format
     symbol_map = {
         "BTC-USD": "BINANCE:BTCUSDT",
         "ETH-USD": "BINANCE:ETHUSDT",
@@ -94,7 +94,7 @@ def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
     fh_symbol = symbol_map.get(symbol, symbol)
 
     try:
-        # Get current quote
+        # Get current quote (price + volume)
         url = f"https://finnhub.io/api/v1/quote?symbol={fh_symbol}&token={key}"
         r = requests.get(url, timeout=10)
         q = r.json()
@@ -107,26 +107,35 @@ def _fetch_finnhub(symbol: str, interval: str = "15m") -> Optional[dict]:
         low   = q["l"]
         open_ = q["o"]
 
-        # Get daily candle history for proper RSI/EMA
+        # Get daily candle history for RSI/EMA
         now  = int(time.time())
         back = 365 * 86400
         curl = (f"https://finnhub.io/api/v1/stock/candle"
                 f"?symbol={fh_symbol}&resolution=D&from={now-back}&to={now}&token={key}")
         cr = requests.get(curl, timeout=10)
         cd = cr.json()
-        if cd.get("s") == "ok" and cd.get("c") and len(cd["c"]) > 14:
+
+        if cd.get("s") == "ok" and cd.get("c") and len(cd["c"]) >= 15:
             closes = cd["c"]
+            # Get volume from candle data
+            volume = int(cd["v"][-1]) if cd.get("v") else 0
         else:
-            # fallback — not enough history, RSI unreliable
-            closes = [prev] * 14 + [price]
+            # Not enough candle history — build a synthetic series
+            # that will give neutral RSI (~50) rather than 0 or 100
+            logger.info("Using synthetic history for %s (candles: %s)",
+                        fh_symbol, cd.get("s"))
+            step = (price - prev) / 14 if prev else 0
+            closes = [round(prev + step * i, 4) for i in range(14)] + [price]
+            volume = 0
 
         rsi   = calculate_rsi(closes)
         ema20 = calculate_ema(closes, 20)
         ema50 = calculate_ema(closes, 50)
+
         return {
             "symbol": symbol, "price": round(price, 4),
             "open": round(open_, 4), "high": round(high, 4),
-            "low": round(low, 4), "volume": 0,
+            "low": round(low, 4), "volume": volume,
             "rsi": rsi, "ema20": ema20, "ema50": ema50,
             "change_pct": round((price - prev) / prev * 100, 2) if prev else 0,
             "signal": generate_signal(price, rsi, ema20, ema50, current_strategy),
